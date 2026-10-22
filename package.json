@@ -1,0 +1,28 @@
+{
+  "name": "cikgu-ai",
+  "version": "1.0.0",
+  "description": "CIKGU AI – Smart Learning Assistant for Malaysian Primary School Pupils",
+  "main": "server.js",
+  "scripts": {
+    "start": "node start.js",
+    "dev": "node start.js",
+    "test": "node tests/chatbot.test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "telegraf": "^4.15.3"
+  },
+  "keywords": [
+    "education",
+    "chatbot",
+    "mathematics",
+    "malaysia",
+    "primary-school"
+  ],
+  "author": "CIKGU AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
