@@ -37,6 +37,10 @@ if (!TOKEN) {
 const bot      = new Telegraf(TOKEN);
 const sessions = {};   // keyed by Telegram user ID (string)
 
+// Delete any webhook that may have been set previously.
+// Without this, Telegram may silently ignore long-polling requests.
+bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
+
 function getSession(userId, firstName) {
   if (!sessions[userId]) {
     sessions[userId] = createSession(firstName || '');
@@ -197,14 +201,14 @@ bot.catch((err, ctx) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Launch (long-polling)
+// Launch (long-polling) — drop any existing webhook first so polling works
 // ─────────────────────────────────────────────────────────────────────────────
 
-bot.launch()
+bot.launch({ dropPendingUpdates: true })
   .then(() => {
     const info = bot.botInfo;
     console.log(`✅ Telegram bot connected: @${info ? info.username : 'CIKGUAI0001_bot'}`);
-    console.log('   Users can now chat at: https://t.me/CIKGUAI0001_bot');
+    console.log('   Users can now chat at: https://t.me/' + (info ? info.username : 'CIKGUAI0001_bot'));
   })
   .catch(err => {
     console.error('❌ Telegram bot failed to start:', err.message);

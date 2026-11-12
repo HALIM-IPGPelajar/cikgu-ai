@@ -1,30 +1,21 @@
 'use strict';
 /**
  * CIKGU AI – app.js
- * Browser front-end. Communicates with /api/chat (Express back-end).
- * No LLM API used — all intelligence is in the rule-based chatbotEngine.
+ * Browser front-end.
+ * Runs entirely in the browser using window.CikguEngine (engine.js).
+ * No server required — works on GitHub Pages.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Constants & state
+// State
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SESSION_KEY  = 'cikgu_session_id';
 const PROGRESS_KEY = 'cikgu_progress';
 const WHATSAPP_URL = 'https://wa.me/601158921344';
 
-function makeSessionId() {
-  return 'web_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now();
-}
-
-let sessionId = localStorage.getItem(SESSION_KEY) || (() => {
-  const id = makeSessionId();
-  localStorage.setItem(SESSION_KEY, id);
-  return id;
-})();
-
-let nickname = '';
-let progress = (() => {
+let nickname  = '';
+let session   = null;   // CikguEngine session object
+let progress  = (() => {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || null; } catch { return null; }
 })() || { points: 0, stars: 0, completedQuestions: [], badges: [] };
 
@@ -67,6 +58,11 @@ nicknameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startApp
 
 function startApp() {
   nickname = nicknameInput.value.trim().slice(0, 20);
+
+  // Restore persisted progress into a fresh session
+  session = window.CikguEngine.createSession(nickname);
+  session.progress = progress;
+
   welcomeScreen.classList.remove('active');
   appScreen.classList.add('active');
   updateProgressUI();
@@ -79,7 +75,6 @@ function startApp() {
 
 sidebarToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
 
-// Close sidebar when clicking outside on mobile
 document.addEventListener('click', e => {
   if (window.innerWidth <= 720 &&
       sidebar.classList.contains('open') &&
@@ -89,17 +84,15 @@ document.addEventListener('click', e => {
   }
 });
 
-// Lesson buttons in sidebar
 document.querySelectorAll('.lesson-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.lesson-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    sendMessage(btn.dataset.lesson);   // sends "lesson1" … "lesson6"
+    sendMessage(btn.dataset.lesson);
     sidebar.classList.remove('open');
   });
 });
 
-// Action buttons in sidebar
 document.querySelectorAll('.action-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     sendMessage(btn.dataset.action);
@@ -158,55 +151,48 @@ chatInput.addEventListener('keydown', e => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core send / receive
+// Core send / receive — now fully in-browser, no fetch needed
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sendMessage(text) {
+function sendMessage(text) {
   if (!text) return;
+  if (!session) {
+    // App started before engine ready — init with empty nickname
+    session = window.CikguEngine.createSession('');
+    session.progress = progress;
+  }
 
   hideEmpty();
   appendMessage('user', text);
   showTyping();
   clearQuickReplies();
 
-  try {
-    const res = await fetch('/api/chat', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ sessionId, message: text, nickname })
-    });
+  // Small timeout so the typing animation is visible
+  setTimeout(() => {
+    try {
+      const result = window.CikguEngine.processMessage(session, text);
+      session = result.session;
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      hideTyping();
 
-    const data = await res.json();
-    hideTyping();
-
-    if (data.error) {
-      appendMessage('bot', `😕 Something went wrong: ${data.error}`);
-      return;
-    }
-
-    // Track stars earned this turn for celebration
-    const prevStars = progress.stars;
-
-    if (data.progress) {
-      progress = data.progress;
+      // Sync progress from engine session → local state & localStorage
+      const prevStars = progress.stars;
+      progress = session.progress;
       localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
       updateProgressUI();
       if (progress.stars > prevStars) triggerCelebration(progress.stars - prevStars);
+
+      appendMessage('bot', result.response);
+
+      if (result.buttons && result.buttons.length > 0) {
+        renderQuickReplies(result.buttons);
+      }
+    } catch (err) {
+      hideTyping();
+      appendMessage('bot', '😅 Something went wrong. Please refresh the page.');
+      console.error('[CikguEngine]', err);
     }
-
-    appendMessage('bot', data.response);
-
-    if (data.buttons && data.buttons.length > 0) {
-      renderQuickReplies(data.buttons);
-    }
-
-  } catch (err) {
-    hideTyping();
-    appendMessage('bot', '🌐 Connection error. Is the server running? Please refresh and try again.');
-    console.error('[fetch]', err);
-  }
+  }, 400);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,7 +271,6 @@ function clearQuickReplies() {
 function renderQuickReplies(buttons) {
   clearQuickReplies();
   buttons.forEach(btn => {
-    // WhatsApp URL buttons open a new tab
     if (btn.value && btn.value.startsWith('https://wa.me')) {
       const a = document.createElement('a');
       a.className  = 'qr-btn';
@@ -319,7 +304,7 @@ function updateProgressUI() {
   headerStars.textContent  = progress.stars;
   const completed = progress.completedQuestions.length;
   const pct = Math.min(100, Math.round((completed / 24) * 100));
-  progressBarMini.style.width  = pct + '%';
+  progressBarMini.style.width   = pct + '%';
   progressMiniCount.textContent = `${completed} / 24`;
 }
 
@@ -335,7 +320,6 @@ function renderProgressModal() {
   const mastery = getMasteryLevel(progress.stars);
   $('masteryBadge').textContent = `${mastery.emoji} ${mastery.level}`;
 
-  // Badges
   const BADGE_DEFS = [
     { label: '⭐ First Star',           desc: 'Complete 1 question correctly', earned: s => s >= 1  },
     { label: '🚀 Rising Mathematician', desc: 'Earn 5 stars',                 earned: s => s >= 5  },
